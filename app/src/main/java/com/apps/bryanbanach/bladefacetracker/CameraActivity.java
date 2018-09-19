@@ -3,6 +3,7 @@ package com.apps.bryanbanach.bladefacetracker;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -11,8 +12,12 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.support.v4.content.ContextCompat;
 import android.util.Size;
 import android.view.Menu;
@@ -22,6 +27,11 @@ import android.widget.Toast;
 
 import com.vuzix.hud.actionmenu.ActionMenuActivity;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOError;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -93,6 +103,53 @@ public class CameraActivity extends ActionMenuActivity {
                 }
             };
 
+    private HandlerThread mBackgroundThread;
+    private Handler mBackgroundHandler;
+    private static File mImageFile;
+    private ImageReader mImageReader;
+    private final ImageReader.OnImageAvailableListener mOnImageAvailableListener =
+            new ImageReader.OnImageAvailableListener() {
+                @Override
+                public void onImageAvailable(ImageReader reader) {
+                    mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage()));
+                }
+            };
+
+
+    private static class ImageSaver implements Runnable {
+        private final Image mImage;
+
+        private ImageSaver(Image image){
+            mImage = image;
+        }
+
+        @Override
+        public void run(){
+            ByteBuffer byteBuffer = mImage.getPlanes()[0].getBuffer();
+            byte[] bytes = new byte[byteBuffer.remaining()];
+            byteBuffer.get(bytes);
+
+            FileOutputStream fileOutputStream = null;
+
+            try {
+                fileOutputStream = new FileOutputStream(mImageFile);
+                fileOutputStream.write(bytes);
+            } catch (IOException e){
+                e.printStackTrace();
+            } finally {
+                mImage.close();
+                if(fileOutputStream != null){
+                    try{
+                        fileOutputStream.close();
+                    } catch (IOException e){
+                        e.printStackTrace();
+                    }
+                }
+
+            }
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -118,6 +175,7 @@ public class CameraActivity extends ActionMenuActivity {
     public void onResume(){
         super.onResume();
 
+        openBackgroundThread();
 
         if(mTextureView.isAvailable()){
             setupCamera(mTextureView.getWidth(), mTextureView.getHeight());
@@ -130,6 +188,9 @@ public class CameraActivity extends ActionMenuActivity {
     @Override
     public void onPause(){
         closeCamera();
+
+        closeBackgroundThread();
+
         super.onPause();
     }
 
@@ -154,6 +215,22 @@ public class CameraActivity extends ActionMenuActivity {
                     continue;
                 }
                 StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+
+                Size largestImageSize = Collections.max(
+                        Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
+                        new Comparator<Size>() {
+                            @Override
+                            public int compare(Size o1, Size o2) {
+                                return Long.signum(o1.getWidth() * o1.getHeight() - o2.getWidth() * o2.getHeight());
+                            }
+                        }
+                );
+
+                mImageReader = ImageReader.newInstance(largestImageSize.getWidth(), largestImageSize.getHeight(),
+                        ImageFormat.JPEG,
+                        1);
+                mImageReader.setOnImageAvailableListener(mOnImageAvailableListener, mBackgroundHandler);
+
                 mPreviewSize = getPreferredPreviewSize(map.getOutputSizes(SurfaceTexture.class), width, height);
                 mCameraId = cameraID;
                 return;
@@ -190,6 +267,14 @@ public class CameraActivity extends ActionMenuActivity {
     }
 
     private void closeCamera(){
+        if(mCameraCaptureSession != null){
+            mCameraCaptureSession.close();
+            mCameraCaptureSession = null;
+        }
+        if(mCameraDevice != null){
+            mCameraDevice.close();
+            mCameraDevice = null;
+        }
     }
 
     private void openCamera(){
@@ -198,7 +283,7 @@ public class CameraActivity extends ActionMenuActivity {
             if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if(ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
                         PackageManager.PERMISSION_GRANTED){
-                    cameraManager.openCamera(mCameraId, mCameraDeviceStateCallback, null);
+                    cameraManager.openCamera(mCameraId, mCameraDeviceStateCallback, mBackgroundHandler);
                 } else {
                     if(shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)){
                         Toast.makeText(this,
@@ -207,7 +292,7 @@ public class CameraActivity extends ActionMenuActivity {
                     requestPermissions(new String[] {Manifest.permission.CAMERA}, REQUEST_CAMERA_RESULT);
                 }
             } else {
-                cameraManager.openCamera(mCameraId, mCameraDeviceStateCallback, null);
+                cameraManager.openCamera(mCameraId, mCameraDeviceStateCallback, mBackgroundHandler);
             }
         } catch (CameraAccessException e){
             e.printStackTrace();
@@ -273,6 +358,23 @@ public class CameraActivity extends ActionMenuActivity {
                         }
                     },null);
         } catch (CameraAccessException e){
+            e.printStackTrace();
+        }
+    }
+
+    private void openBackgroundThread(){
+        mBackgroundThread = new HandlerThread("Camera 2 background thread");
+        mBackgroundThread.start();
+        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+    }
+
+    private void closeBackgroundThread(){
+        mBackgroundThread.quitSafely();
+        try{
+            mBackgroundThread.join();
+            mBackgroundThread = null;
+            mBackgroundHandler = null;
+        } catch (InterruptedException e){
             e.printStackTrace();
         }
     }
