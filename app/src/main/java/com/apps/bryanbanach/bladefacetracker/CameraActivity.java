@@ -10,7 +10,10 @@ import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
@@ -18,9 +21,12 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.support.annotation.NonNull;
 import android.support.v4.content.ContextCompat;
 import android.util.Size;
+import android.util.SparseIntArray;
 import android.view.Menu;
+import android.view.MenuItem;
 import android.view.Surface;
 import android.view.TextureView;
 import android.widget.Toast;
@@ -37,14 +43,27 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.ToIntBiFunction;
 
 public class CameraActivity extends ActionMenuActivity {
 
+    private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+    static {
+        ORIENTATIONS.append(Surface.ROTATION_0, 90);
+        ORIENTATIONS.append(Surface.ROTATION_90, 0);
+        ORIENTATIONS.append(Surface.ROTATION_180, 270);
+        ORIENTATIONS.append(Surface.ROTATION_270, 180);
+    }
+    private static final int ACTIVITY_START_CAMERA_APP = 0;
+    private static final int STATE_PREVIEW = 0;
+    private static final int STATE_WAIT_LOCK = 1;
+    private int mState;
     private static final int REQUEST_WRITE_STORAGE = 1;
     private static final int REQUEST_CAMERA_RESULT = 2;
     private TextureView mTextureView;
     private Size mPreviewSize;
     private String mCameraId;
+    private MenuItem takePhotoMenuItem;
 
     private TextureView.SurfaceTextureListener mSurfaceTextureListener = new TextureView.SurfaceTextureListener() {
         @Override
@@ -69,6 +88,10 @@ public class CameraActivity extends ActionMenuActivity {
 
         }
     };
+
+    private void takePhoto(MenuItem item){
+        lockFocus();
+    }
 
     private CameraDevice mCameraDevice;
     private CameraDevice.StateCallback mCameraDeviceStateCallback =
@@ -97,11 +120,44 @@ public class CameraActivity extends ActionMenuActivity {
     private CameraCaptureSession mCameraCaptureSession;
     private CameraCaptureSession.CaptureCallback mSessionCaptureCallback =
             new CameraCaptureSession.CaptureCallback() {
+
+                private void process(CaptureResult result){
+                    switch(mState){
+                        case STATE_PREVIEW:
+                            //Do nothing
+                            break;
+                        case STATE_WAIT_LOCK:
+                            Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
+                            if(afState == CaptureRequest.CONTROL_AF_STATE_FOCUSED_LOCKED){
+                                unLockFocus();
+                                Toast.makeText(getApplicationContext(), "Focus Locked", Toast.LENGTH_SHORT).show();
+                            }
+                            break;
+                    }
+                }
+
                 @Override
                 public void onCaptureStarted(CameraCaptureSession session, CaptureRequest request, long timestamp, long frameNumber) {
                     super.onCaptureStarted(session, request, timestamp, frameNumber);
                 }
+
+                @Override
+                public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                    super.onCaptureCompleted(session, request, result);
+
+                    process(result);
+                }
+
+                @Override
+                public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
+                    super.onCaptureFailed(session, request, failure);
+
+                    Toast.makeText(getApplicationContext(), "Focus Lock Failed", Toast.LENGTH_SHORT).show();
+
+                }
             };
+
+
 
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
@@ -197,6 +253,10 @@ public class CameraActivity extends ActionMenuActivity {
     @Override
     protected boolean onCreateActionMenu(Menu menu){
         super.onCreateActionMenu(menu);
+        //getMenuInflater().inflate(R.menu.photo_menu, menu);
+
+        //takePhotoMenuItem = menu.findItem(R.id.take_photo);
+
         return true;
     }
 
@@ -275,6 +335,10 @@ public class CameraActivity extends ActionMenuActivity {
             mCameraDevice.close();
             mCameraDevice = null;
         }
+        if(mImageReader != null){
+            mImageReader.close();
+            mImageReader = null;
+        }
     }
 
     private void openCamera(){
@@ -328,7 +392,7 @@ public class CameraActivity extends ActionMenuActivity {
             Surface previewSurface = new Surface(surfaceTexture);
             mPreviewCaptureRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewCaptureRequestBuilder.addTarget(previewSurface);
-            mCameraDevice.createCaptureSession(Arrays.asList(previewSurface),
+            mCameraDevice.createCaptureSession(Arrays.asList(previewSurface, mImageReader.getSurface()),
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
@@ -375,6 +439,59 @@ public class CameraActivity extends ActionMenuActivity {
             mBackgroundThread = null;
             mBackgroundHandler = null;
         } catch (InterruptedException e){
+            e.printStackTrace();
+        }
+    }
+
+    //Add focus lock methods here
+    private void lockFocus(){
+        try {
+            mState = STATE_WAIT_LOCK;
+            mPreviewCaptureRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                    CaptureRequest.CONTROL_AF_TRIGGER_START);
+            mCameraCaptureSession.capture(mPreviewCaptureRequestBuilder.build(),
+                    mSessionCaptureCallback, mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void unLockFocus(){
+        try {
+            mState = STATE_PREVIEW;
+            mPreviewCaptureRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                    CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
+            mCameraCaptureSession.capture(mPreviewCaptureRequestBuilder.build(),
+                    mSessionCaptureCallback, mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void captureStillImage(){
+        try {
+            CaptureRequest.Builder captureStillBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureStillBuilder.addTarget(mImageReader.getSurface());
+
+            int rotation = getWindowManager().getDefaultDisplay().getRotation();
+            captureStillBuilder.set(CaptureRequest.JPEG_ORIENTATION,
+                    ORIENTATIONS.get(rotation));
+
+            CameraCaptureSession.CaptureCallback captureCallback =
+                    new CameraCaptureSession.CaptureCallback() {
+                        @Override
+                        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                            super.onCaptureCompleted(session, request, result);
+
+                            Toast.makeText(getApplicationContext(),
+                                    "Image captured", Toast.LENGTH_SHORT).show();
+
+                        }
+                    };
+
+            mCameraCaptureSession.capture(captureStillBuilder.build(), captureCallback, null);
+
+        } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }

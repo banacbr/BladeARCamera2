@@ -68,10 +68,13 @@ public class MainActivity extends ActionMenuActivity {
 
     //Action menu click events
     public void showHello(MenuItem item){
-        showToast("Hello World!");
-        mainText.setText("Hello world");
-        VuzixMenuItem.setEnabled(true);
-        BladeMenuItem.setEnabled(true);
+        Intent intent = new Intent(this, Camera1Activity.class);
+        startActivity(intent);
+
+        //showToast("Hello World!");
+//        mainText.setText("Hello world");
+//        VuzixMenuItem.setEnabled(true);
+//        BladeMenuItem.setEnabled(true);
     }
 
     public void showVuzix(MenuItem item){
