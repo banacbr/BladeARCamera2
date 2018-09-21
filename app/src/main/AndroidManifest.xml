@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.apps.bryanbanach.bladefacetracker">
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-feature android:name="android.hardware.camera2.full"/>
-    <uses-feature android:name="android.hardware.Camera"/>
+
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <uses-feature android:name="android.hardware.camera2.full" />
+    <uses-feature android:name="android.hardware.Camera" />
+
     <application
         android:name=".BladeSampleApplication"
         android:allowBackup="true"
@@ -13,25 +17,35 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-        <activity android:name=".MainActivity">
+        <!--<provider-->
+            <!--android:authorities="com.apps.bryanbanach.bladefacetracker"-->
+            <!--android:name="android.support.v4.content.FileProvider"-->
+            <!--android:exported="false"-->
+            <!--android:grantUriPermissions="true">-->
+            <!--<meta-data-->
+                <!--android:name="android.support.FILE_PROVIDER_PATHS"-->
+                <!--android:resource="@xml/file_paths"></meta-data>-->
+        <!--</provider>-->
+        <activity android:name=".FaceActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".CameraActivity"/>
-        <activity android:name=".Camera1Activity"/>
+        <activity android:name=".CameraActivity" />
+        <activity android:name=".MainActivity" />
 
         <receiver
             android:name=".dynamic_theme_receiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.vuzix.intent.action.UI_DISPLAY_MODE"/>
+                <action android:name="com.vuzix.intent.action.UI_DISPLAY_MODE" />
             </intent-filter>
-
         </receiver>
+
+        <activity android:name=".Camera1Activity"/>
     </application>
 
 </manifest>

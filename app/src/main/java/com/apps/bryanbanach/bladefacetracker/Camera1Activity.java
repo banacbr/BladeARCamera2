@@ -1,24 +1,83 @@
 package com.apps.bryanbanach.bladefacetracker;
 
+import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
-import android.graphics.Color;
-import android.graphics.Paint;
+import android.content.pm.PackageManager;
 import android.hardware.Camera;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.util.Log;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.Toast;
 
 import com.vuzix.hud.actionmenu.ActionMenuActivity;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 
+@SuppressWarnings("Deprecated")
 public class Camera1Activity extends ActionMenuActivity {
 
     private Camera mCamera;
     private CameraPreview mPreview;
+    private ImageView mImageView;
+    private MenuItem takePhotoMenuItem;
+    private HandlerThread mBackgroundThread;
+    private Handler mHandler;
+    private static final int PERMISSION_ALL = 1;
+    private static final String[] PERMISSIONS = {
+            Manifest.permission.CAMERA,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+    };
+
+    private Camera.ShutterCallback mShutterCallback = new Camera.ShutterCallback() {
+        @Override
+        public void onShutter() {
+            // Do stuff here for the shutter
+            //Toast.makeText(getApplicationContext(), "Click!", Toast.LENGTH_SHORT).show();
+        }
+    };
+
+    private Camera.PictureCallback mPictureCallback = new Camera.PictureCallback() {
+        @Override
+        public void onPictureTaken(byte[] data, Camera camera) {
+            File pictureFileDir = getDir();
+            if(!pictureFileDir.exists() && !pictureFileDir.mkdir()) {
+                Log.d("Picture Taken Debug", "Can't create folder to save image");
+                return;
+            }
+
+            File pictureFile = new File("picture.jpg");
+
+            try {
+                //FileOutputStream fos = new FileOutputStream(pictureFile);
+                FileOutputStream fos = openFileOutput("picture.jpg", Activity.MODE_PRIVATE);
+                fos.write(data);
+                fos.flush();
+                fos.close();
+                Log.d("output stream", "photo saved");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            mCamera.startPreview();
+        }
+    };
+
+    private File getDir(){
+        File sdDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+        return new File(sdDir, "cameraDemo");
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,14 +85,53 @@ public class Camera1Activity extends ActionMenuActivity {
 
         setContentView(R.layout.activity_camera1);
 
-        // Create an instance of Camera
-        mCamera = getCameraInstance();
-        mCamera.setFaceDetectionListener(new FaceDetectionListener());
 
-        // Create our preview view and set it as the content of our activity
-        mPreview = new CameraPreview(this, mCamera);
-        FrameLayout preview = (FrameLayout) findViewById(R.id.camera1_view);
-        preview.addView(mPreview);
+    }
+
+    private static boolean hasPermissions(Context context, String... permissions){
+        if(context != null && permissions != null){
+            for(String permission: permissions){
+                if(ContextCompat.checkSelfPermission(context,permission) != PackageManager.PERMISSION_GRANTED) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults){
+        if(grantResults[0] != PackageManager.PERMISSION_GRANTED){
+            Toast.makeText(getApplicationContext(), "Can't run app without permissions", Toast.LENGTH_SHORT).show();
+        } else {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+    }
+
+    @Override
+    protected boolean onCreateActionMenu(Menu menu) {
+        super.onCreateActionMenu(menu);
+        getMenuInflater().inflate(R.menu.photo_menu, menu);
+        takePhotoMenuItem = menu.findItem(R.id.take_photo);
+        takePhotoMenuItem.setOnMenuItemClickListener(new MenuItem.OnMenuItemClickListener() {
+            @Override
+            public boolean onMenuItemClick(MenuItem item) {
+                takePhotoClick();
+                return false;
+            }
+        });
+        return true;
+    }
+
+    @Override
+    protected boolean alwaysShowActionMenu() {
+        super.alwaysShowActionMenu();
+        return true;
+    }
+
+
+    public void takePhotoClick(){
+        mCamera.takePicture(mShutterCallback, null, mPictureCallback);
     }
 
     @Override
@@ -49,6 +147,25 @@ public class Camera1Activity extends ActionMenuActivity {
     @Override
     protected void onResume() {
         super.onResume();
+
+
+        // Create an instance of Camera
+        try {
+
+            if(!hasPermissions(this, PERMISSIONS)){
+                ActivityCompat.requestPermissions(this, PERMISSIONS, PERMISSION_ALL);
+            } else {
+                mCamera = getCameraInstance();
+                mCamera.setFaceDetectionListener(new FaceDetectionListener());
+
+                // Create our preview view and set it as the content of our activity
+                mPreview = new CameraPreview(this, mCamera);
+                FrameLayout preview = (FrameLayout) findViewById(R.id.camera1_view);
+                preview.addView(mPreview);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     public static Camera getCameraInstance(){
@@ -80,7 +197,6 @@ class CameraPreview extends SurfaceView implements SurfaceHolder.Callback {
         // The surface has been created tell the camera where to draw the preview
 
         try {
-            mCamera.setDisplayOrientation(180);
             mCamera.setPreviewDisplay(holder);
             mCamera.startPreview();
 
@@ -141,8 +257,11 @@ class FaceDetectionListener implements Camera.FaceDetectionListener{
     @Override
     public void onFaceDetection(Camera.Face[] faces, Camera camera) {
         if(faces.length > 0){
-            Log.d("Face Detection:", "face detected: " + faces.length + " Face 1 Location X: " +
-                    faces[0].rect.centerX() + " Y: " + faces[0].rect.centerY());
+            for(int i = 0; i < faces.length; i++){
+                Log.d("Face Detection:", "face detected: " + faces.length + " Face " + i + " Location X: " +
+                        faces[0].rect.centerX() + " Y: " + faces[0].rect.centerY());
+            }
+
         }
     }
 }
