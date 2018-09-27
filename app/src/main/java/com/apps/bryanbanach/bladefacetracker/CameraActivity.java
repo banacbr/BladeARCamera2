@@ -89,10 +89,6 @@ public class CameraActivity extends ActionMenuActivity {
         }
     };
 
-    private void takePhoto(MenuItem item){
-        lockFocus();
-    }
-
     private CameraDevice mCameraDevice;
     private CameraDevice.StateCallback mCameraDeviceStateCallback =
             new CameraDevice.StateCallback() {
@@ -100,7 +96,6 @@ public class CameraActivity extends ActionMenuActivity {
                 public void onOpened(CameraDevice camera) {
                     mCameraDevice = camera;
                     createCameraPreviewSession();
-                    //Toast.makeText(getApplicationContext(), "Camera Opened", Toast.LENGTH_SHORT).show();
                 }
 
                 @Override
@@ -129,8 +124,9 @@ public class CameraActivity extends ActionMenuActivity {
                         case STATE_WAIT_LOCK:
                             Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
                             if(afState == CaptureRequest.CONTROL_AF_STATE_FOCUSED_LOCKED){
-                                unLockFocus();
-                                Toast.makeText(getApplicationContext(), "Focus Locked", Toast.LENGTH_SHORT).show();
+//                                unLockFocus();
+//                                Toast.makeText(getApplicationContext(), "Focus Locked", Toast.LENGTH_SHORT).show();
+                                captureStillImage();
                             }
                             break;
                     }
@@ -250,12 +246,21 @@ public class CameraActivity extends ActionMenuActivity {
         super.onPause();
     }
 
+
+
     @Override
     protected boolean onCreateActionMenu(Menu menu){
         super.onCreateActionMenu(menu);
-        //getMenuInflater().inflate(R.menu.photo_menu, menu);
+        getMenuInflater().inflate(R.menu.photo_menu, menu);
 
-        //takePhotoMenuItem = menu.findItem(R.id.take_photo);
+        takePhotoMenuItem = menu.findItem(R.id.take_photo);
+        takePhotoMenuItem.setOnMenuItemClickListener(new MenuItem.OnMenuItemClickListener() {
+            @Override
+            public boolean onMenuItemClick(MenuItem item) {
+                lockFocus();
+                return false;
+            }
+        });
 
         return true;
     }
@@ -461,6 +466,7 @@ public class CameraActivity extends ActionMenuActivity {
             mState = STATE_PREVIEW;
             mPreviewCaptureRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
                     CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
+            setAutoFlash(mPreviewCaptureRequestBuilder);
             mCameraCaptureSession.capture(mPreviewCaptureRequestBuilder.build(),
                     mSessionCaptureCallback, mBackgroundHandler);
         } catch (CameraAccessException e) {
@@ -468,10 +474,25 @@ public class CameraActivity extends ActionMenuActivity {
         }
     }
 
+    // Check to see if flash is supported by camera
+    private boolean mFlashSupported;
+
+    private void setAutoFlash(CaptureRequest.Builder requestBuilder){
+        if(mFlashSupported){
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+        }
+    }
+
     private void captureStillImage(){
         try {
             CaptureRequest.Builder captureStillBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             captureStillBuilder.addTarget(mImageReader.getSurface());
+
+            // Use the same AE and AF modes as the preview
+            captureStillBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            setAutoFlash(captureStillBuilder);
 
             int rotation = getWindowManager().getDefaultDisplay().getRotation();
             captureStillBuilder.set(CaptureRequest.JPEG_ORIENTATION,
@@ -485,6 +506,7 @@ public class CameraActivity extends ActionMenuActivity {
 
                             Toast.makeText(getApplicationContext(),
                                     "Image captured", Toast.LENGTH_SHORT).show();
+                            unLockFocus();
 
                         }
                     };
